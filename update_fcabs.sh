@@ -60,8 +60,8 @@ echo "✓ Data loaded into temporary table"
 # Step 3: Update existing records and insert new ones
 mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" << 'EOF'
 -- Update existing records (based on local_id)
-UPDATE fcabs1004 f
-INNER JOIN fcabs1004_temp t ON f.local_id = t.local_id
+UPDATE fcabs2025 f
+INNER JOIN fcabs2025_temp t ON f.local_id = t.local_id
 SET 
     f.precinct_name = t.precinct_name,
     f.precinct_code = t.precinct_code,
@@ -101,7 +101,7 @@ SET
     f.status = t.status;
 
 -- Insert new records (that don't exist in main table)
-INSERT INTO fcabs1004 (
+INSERT INTO fcabs2025 (
     precinct_name, precinct_code, precinct_code_with_split, city_or_village,
     school_district, township, house_district, senate_district, congress_district,
     police_district, road_district, fire_district, park_district,
@@ -118,20 +118,20 @@ SELECT
     t.local_id, t.year_of_birth, t.first_name, t.middle_name, t.last_name, t.suffix_name,
     t.address_line_1, t.address_line_2, t.address_line_3, t.address_line_4, t.city, t.state,
     t.zip, t.zip_plus_4, t.mailed, t.date_requested, t.date_returned, t.ballot_style, t.status
-FROM fcabs1004_temp t
-LEFT JOIN fcabs1004 f ON t.local_id = f.local_id
+FROM fcabs2025_temp t
+LEFT JOIN fcabs2025 f ON t.local_id = f.local_id
 WHERE f.local_id IS NULL;
 
 -- Get statistics
 SELECT 
     'Records in temp table' as metric, 
     COUNT(*) as count 
-FROM fcabs1004_temp
+FROM fcabs2025_temp
 UNION ALL
 SELECT 
     'Records in main table after update', 
     COUNT(*) 
-FROM fcabs1004;
+FROM fcabs2025;
 EOF
 
 echo "✓ Records updated and new records inserted"

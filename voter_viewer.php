@@ -6,8 +6,12 @@ $db_user = 'root';
 $db_pass = 'R_250108_z';
 $db_name = 'ohsosvoterfiles';
 
-// Get selected status from dropdown
+// Get selected filters from dropdown
 $selected_status = isset($_GET['status']) ? $_GET['status'] : 'ALL';
+$selected_party = isset($_GET['party']) ? $_GET['party'] : 'ALL';
+$sort_column = isset($_GET['sort']) ? $_GET['sort'] : 'name';
+$sort_direction = isset($_GET['dir']) && $_GET['dir'] === 'desc' ? 'desc' : 'asc';
+$show_all = isset($_GET['limit']) && $_GET['limit'] === 'all';
 
 // Connect to database
 $conn = new mysqli($db_host, $db_user, $db_pass, $db_name);
@@ -15,7 +19,7 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-// Get status counts for dropdown
+// Get status counts for dropdown (all voters)
 $status_query = "
     SELECT 
         CASE 
@@ -34,6 +38,43 @@ $total_count = 0;
 while ($row = $status_result->fetch_assoc()) {
     $statuses[] = $row;
     $total_count += $row['count'];
+}
+
+// Get status counts for pie chart (filtered by party if selected)
+$chart_query = "
+    SELECT 
+        CASE 
+            WHEN status IS NULL OR status = '' THEN 'Outstanding'
+            ELSE status 
+        END as status_display,
+        COALESCE(status, '') as status_value,
+        COUNT(*) as count 
+    FROM fcabs2025
+";
+if ($selected_party !== 'ALL') {
+    $chart_query .= " WHERE party = '" . $conn->real_escape_string($selected_party) . "'";
+}
+$chart_query .= " GROUP BY status ORDER BY count DESC";
+
+$chart_result = $conn->query($chart_query);
+$chart_statuses = [];
+while ($row = $chart_result->fetch_assoc()) {
+    $chart_statuses[] = $row;
+}
+
+// Get party counts for dropdown
+$party_query = "
+    SELECT 
+        party,
+        COUNT(*) as count 
+    FROM fcabs2025 
+    GROUP BY party 
+    ORDER BY count DESC
+";
+$party_result = $conn->query($party_query);
+$parties = [];
+while ($row = $party_result->fetch_assoc()) {
+    $parties[] = $row;
 }
 
 // Build voter query based on selected status
@@ -60,16 +101,72 @@ $voter_query = "
     FROM fcabs2025
 ";
 
-// Add WHERE clause based on selection
+// Add WHERE clause based on selections
+$where_clauses = [];
+
 if ($selected_status !== 'ALL') {
     if ($selected_status === 'Outstanding') {
-        $voter_query .= " WHERE (status IS NULL OR status = '')";
+        $where_clauses[] = "(status IS NULL OR status = '')";
     } else {
-        $voter_query .= " WHERE status = '" . $conn->real_escape_string($selected_status) . "'";
+        $where_clauses[] = "status = '" . $conn->real_escape_string($selected_status) . "'";
     }
 }
 
-$voter_query .= " ORDER BY last_name, first_name LIMIT 1000";
+if ($selected_party !== 'ALL') {
+    $where_clauses[] = "party = '" . $conn->real_escape_string($selected_party) . "'";
+}
+
+if (count($where_clauses) > 0) {
+    $voter_query .= " WHERE " . implode(' AND ', $where_clauses);
+}
+
+// Add ORDER BY clause based on sort parameters
+$order_by = "";
+switch($sort_column) {
+    case 'name':
+        $order_by = "last_name, first_name";
+        break;
+    case 'party':
+        $order_by = "party " . strtoupper($sort_direction) . ", last_name, first_name";
+        break;
+    case 'address':
+        $order_by = "address_line_1 " . strtoupper($sort_direction) . ", last_name, first_name";
+        break;
+    case 'city':
+        $order_by = "city " . strtoupper($sort_direction) . ", state " . strtoupper($sort_direction) . ", last_name, first_name";
+        break;
+    case 'precinct':
+        $order_by = "precinct_name " . strtoupper($sort_direction) . ", last_name, first_name";
+        break;
+    case 'requested':
+        $order_by = "date_requested " . strtoupper($sort_direction) . ", last_name, first_name";
+        break;
+    case 'returned':
+        $order_by = "date_returned " . strtoupper($sort_direction) . ", last_name, first_name";
+        break;
+    case 'status':
+        $order_by = "status " . strtoupper($sort_direction) . ", last_name, first_name";
+        break;
+    default:
+        $order_by = "last_name, first_name";
+}
+
+// For name column, apply direction to the order by
+if ($sort_column === 'name') {
+    $voter_query .= " ORDER BY " . $order_by . " " . strtoupper($sort_direction);
+} else {
+    $voter_query .= " ORDER BY " . $order_by;
+}
+
+// Get total count before applying limit
+$count_query = "SELECT COUNT(*) as total FROM fcabs2025" . $where_clause;
+$count_result = $conn->query($count_query);
+$total_count_filtered = $count_result->fetch_assoc()['total'];
+
+// Add LIMIT unless showing all
+if (!$show_all) {
+    $voter_query .= " LIMIT 1000";
+}
 
 $voter_result = $conn->query($voter_query);
 $voters = [];
@@ -77,8 +174,97 @@ while ($row = $voter_result->fetch_assoc()) {
     $voters[] = $row;
 }
 
-$display_count = count($voters);
-$showing_limit = $display_count >= 1000 ? " (showing first 1000)" : "";
+$display_count = $total_count_filtered;
+$showing_limit = "";
+$show_all_button = "";
+
+if (!$show_all && $display_count >= 1000) {
+    $showing_limit = " (showing first 1,000)";
+    // Build show all URL
+    $params = [];
+    if ($selected_status !== 'ALL') $params['status'] = $selected_status;
+    if ($selected_party !== 'ALL') $params['party'] = $selected_party;
+    if ($sort_column !== 'name') $params['sort'] = $sort_column;
+    if ($sort_direction !== 'asc') $params['dir'] = $sort_direction;
+    $params['limit'] = 'all';
+    $show_all_url = '?' . http_build_query($params);
+    $show_all_button = ' <button onclick="window.location.href=\'' . $show_all_url . '\'" style="padding:5px 12px; background:#667eea; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; margin-left:10px;">Show all</button>';
+}
+
+// Handle AJAX requests
+if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
+    header('Content-Type: application/json');
+    
+    // Build table HTML
+    $table_html = '';
+    foreach ($voters as $voter) {
+        $table_html .= '<tr>';
+        $table_html .= '<td><strong>' . htmlspecialchars($voter['last_name']) . '</strong>, ' . htmlspecialchars($voter['first_name']);
+        if ($voter['middle_name']) {
+            $table_html .= ' ' . htmlspecialchars(substr($voter['middle_name'], 0, 1)) . '.';
+        }
+        $table_html .= '</td>';
+        $table_html .= '<td><span class="party-' . htmlspecialchars($voter['party']) . '">' . htmlspecialchars($voter['party']) . '</span></td>';
+        $table_html .= '<td>' . htmlspecialchars($voter['address_line_1']) . '</td>';
+        $table_html .= '<td>' . htmlspecialchars($voter['city']) . ', ' . htmlspecialchars($voter['state']) . ' ' . htmlspecialchars($voter['zip']) . '</td>';
+        $table_html .= '<td style="font-size: 11px;">' . htmlspecialchars($voter['precinct_name']) . '</td>';
+        $table_html .= '<td>' . ($voter['date_requested'] ? date('m/d/Y', strtotime($voter['date_requested'])) : '-') . '</td>';
+        $table_html .= '<td>' . ($voter['date_returned'] ? date('m/d/Y', strtotime($voter['date_returned'])) : '-') . '</td>';
+        $status = $voter['status_display'];
+        $badge_class = 'badge ';
+        if ($status === 'VAL') {
+            $badge_class .= 'badge-val';
+        } elseif ($status === 'Outstanding') {
+            $badge_class .= 'badge-outstanding';
+        } else {
+            $badge_class .= 'badge-problem';
+        }
+        $table_html .= '<td><span class="' . $badge_class . '">' . htmlspecialchars($status) . '</span></td>';
+        $table_html .= '</tr>';
+    }
+    
+    // Build headers info
+    $columns = [
+        'name' => 'Name',
+        'party' => 'Party',
+        'address' => 'Address',
+        'city' => 'City',
+        'precinct' => 'Precinct',
+        'requested' => 'Requested',
+        'returned' => 'Returned',
+        'status' => 'Status'
+    ];
+    
+    $headers = [];
+    foreach ($columns as $col => $label) {
+        $params = [];
+        if ($selected_status !== 'ALL') $params['status'] = $selected_status;
+        if ($selected_party !== 'ALL') $params['party'] = $selected_party;
+        $params['sort'] = $col;
+        
+        if ($sort_column === $col) {
+            $params['dir'] = $sort_direction === 'asc' ? 'desc' : 'asc';
+            $sort_class = $sort_direction === 'asc' ? 'sort-asc' : 'sort-desc';
+        } else {
+            $params['dir'] = 'asc';
+            $sort_class = 'sortable';
+        }
+        
+        $headers[] = [
+            'class' => $sort_class,
+            'url' => '?' . http_build_query($params)
+        ];
+    }
+    
+    $stats_html = number_format($display_count) . ' voters' . $showing_limit . $show_all_button;
+    
+    echo json_encode([
+        'html' => $table_html,
+        'headers' => $headers,
+        'stats' => $stats_html
+    ]);
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -146,14 +332,22 @@ $showing_limit = $display_count >= 1000 ? " (showing first 1000)" : "";
             background: #f8f9fa;
             border-bottom: 1px solid #e9ecef;
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
-            gap: 15px;
+            gap: 20px;
+        }
+        
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         
         .controls label {
             font-weight: 600;
             font-size: 14px;
             color: #495057;
+            white-space: nowrap;
         }
         
         .controls select {
@@ -163,7 +357,7 @@ $showing_limit = $display_count >= 1000 ? " (showing first 1000)" : "";
             font-size: 14px;
             background: white;
             cursor: pointer;
-            min-width: 300px;
+            min-width: 250px;
             transition: border-color 0.2s;
         }
         
@@ -206,6 +400,31 @@ $showing_limit = $display_count >= 1000 ? " (showing first 1000)" : "";
             position: sticky;
             top: 0;
             white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s;
+        }
+        
+        th:hover {
+            background: #e9ecef;
+        }
+        
+        th.sortable::after {
+            content: ' ⇅';
+            opacity: 0.3;
+            font-size: 12px;
+        }
+        
+        th.sort-asc::after {
+            content: ' ↑';
+            opacity: 1;
+            color: #667eea;
+        }
+        
+        th.sort-desc::after {
+            content: ' ↓';
+            opacity: 1;
+            color: #667eea;
         }
         
         td {
@@ -288,56 +507,104 @@ $showing_limit = $display_count >= 1000 ? " (showing first 1000)" : "";
                 <h1>🗳️ Franklin County Absentee Voters</h1>
                 <p>Mail-in ballot tracking and status viewer</p>
                 <p style="margin-top: 10px; font-size: 13px; opacity: 0.85;">
-                    📅 Data as of: <strong>November 4, 2025</strong>
+                    📅 Data as of: <strong>November 5, 2025</strong>
                 </p>
             </div>
         </div>
         
         <div class="controls">
-            <label for="status-filter">Filter by Status:</label>
-            <select id="status-filter" name="status" onchange="filterStatus()">
-                <option value="ALL" <?php echo $selected_status === 'ALL' ? 'selected' : ''; ?>>
-                    All Voters (<?php echo number_format($total_count); ?>)
-                </option>
-                <?php foreach ($statuses as $status): ?>
-                    <option value="<?php echo htmlspecialchars($status['status_value']); ?>" 
-                            <?php echo $selected_status === $status['status_value'] || 
-                                      ($selected_status === 'Outstanding' && $status['status_display'] === 'Outstanding') 
-                                      ? 'selected' : ''; ?>>
-                        <?php echo htmlspecialchars($status['status_display']); ?> 
-                        (<?php echo number_format($status['count']); ?>)
+            <div class="filter-group">
+                <label for="status-filter">Filter by Status:</label>
+                <select id="status-filter" name="status" onchange="applyFilters()">
+                    <option value="ALL" <?php echo $selected_status === 'ALL' ? 'selected' : ''; ?>>
+                        All Statuses (<?php echo number_format($total_count); ?>)
                     </option>
-                <?php endforeach; ?>
-            </select>
+                    <?php foreach ($statuses as $status): ?>
+                        <option value="<?php echo htmlspecialchars($status['status_value']); ?>" 
+                                <?php echo $selected_status === $status['status_value'] || 
+                                          ($selected_status === 'Outstanding' && $status['status_display'] === 'Outstanding') 
+                                          ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($status['status_display']); ?> 
+                            (<?php echo number_format($status['count']); ?>)
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="party-filter">Filter by Party:</label>
+                <select id="party-filter" name="party" onchange="applyFilters()">
+                    <option value="ALL" <?php echo $selected_party === 'ALL' ? 'selected' : ''; ?>>
+                        All Parties (<?php echo number_format($total_count); ?>)
+                    </option>
+                    <?php foreach ($parties as $party): ?>
+                        <option value="<?php echo htmlspecialchars($party['party']); ?>" 
+                                <?php echo $selected_party === $party['party'] ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($party['party']); ?> 
+                            (<?php echo number_format($party['count']); ?>)
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
         </div>
         
         <div class="chart-section">
-            <div class="chart-title">Ballot Status Distribution</div>
+            <div class="chart-title">
+                Ballot Status Distribution
+                <?php if ($selected_party !== 'ALL'): ?>
+                    <span style="font-weight: normal; font-size: 16px; color: #6c757d;">
+                        (Party: <?php echo htmlspecialchars($selected_party); ?>)
+                    </span>
+                <?php endif; ?>
+            </div>
             <div class="chart-container">
                 <canvas id="statusChart"></canvas>
             </div>
         </div>
         
         <div class="stats">
-            <strong>Showing:</strong> <?php echo number_format($display_count); ?> voters<?php echo $showing_limit; ?>
+            <?php echo number_format($display_count); ?> voters<?php echo $showing_limit; ?><?php echo $show_all_button; ?>
         </div>
         
         <div class="table-container">
             <?php if (count($voters) > 0): ?>
-                <table>
+                <table id="voterTable">
                     <thead>
                         <tr>
-                            <th>Name</th>
-                            <th>Party</th>
-                            <th>Address</th>
-                            <th>City</th>
-                            <th>Precinct</th>
-                            <th>Requested</th>
-                            <th>Returned</th>
-                            <th>Status</th>
+                            <?php
+                            $columns = [
+                                'name' => 'Name',
+                                'party' => 'Party',
+                                'address' => 'Address',
+                                'city' => 'City',
+                                'precinct' => 'Precinct',
+                                'requested' => 'Requested',
+                                'returned' => 'Returned',
+                                'status' => 'Status'
+                            ];
+                            
+                            foreach ($columns as $col => $label) {
+                                $params = [];
+                                if ($selected_status !== 'ALL') $params['status'] = $selected_status;
+                                if ($selected_party !== 'ALL') $params['party'] = $selected_party;
+                                $params['sort'] = $col;
+                                
+                                // Toggle direction
+                                if ($sort_column === $col) {
+                                    $params['dir'] = $sort_direction === 'asc' ? 'desc' : 'asc';
+                                    $sort_class = $sort_direction === 'asc' ? 'sort-asc' : 'sort-desc';
+                                } else {
+                                    $params['dir'] = 'asc';
+                                    $sort_class = 'sortable';
+                                }
+                                
+                                $url = '?' . http_build_query($params);
+                                echo "<th class='$sort_class' data-url='$url'>$label</th>";
+                            }
+                            ?>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="voterTableBody">
                         <?php foreach ($voters as $voter): ?>
                             <tr>
                                 <td>
@@ -389,14 +656,19 @@ $showing_limit = $display_count >= 1000 ? " (showing first 1000)" : "";
     
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script>
-        function filterStatus() {
-            const select = document.getElementById('status-filter');
-            const status = select.value;
-            window.location.href = '?status=' + encodeURIComponent(status);
+        function applyFilters() {
+            const status = document.getElementById('status-filter').value;
+            const party = document.getElementById('party-filter').value;
+            
+            const params = new URLSearchParams();
+            if (status !== 'ALL') params.append('status', status);
+            if (party !== 'ALL') params.append('party', party);
+            
+            window.location.href = '?' + params.toString();
         }
         
-        // Status Chart Data
-        const statusData = <?php echo json_encode($statuses); ?>;
+        // Status Chart Data (filtered by party if selected)
+        const statusData = <?php echo json_encode($chart_statuses); ?>;
         
         // Define colors for each status
         const statusColors = {
@@ -473,6 +745,60 @@ $showing_limit = $display_count >= 1000 ? " (showing first 1000)" : "";
                     }
                 }
             }
+        });
+        
+        // AJAX table sorting - refreshes only the table, not the whole page
+        document.querySelectorAll('th.sortable, th.sort-asc, th.sort-desc').forEach(header => {
+            header.addEventListener('click', function(e) {
+                e.preventDefault();
+                
+                // Build the full URL with current page path
+                const dataUrl = this.getAttribute('data-url');
+                const currentPath = window.location.pathname;
+                const fullUrl = currentPath + dataUrl;
+                
+                // Update URL in browser without reload
+                window.history.pushState({}, '', fullUrl);
+                
+                // Show loading indicator
+                const tbody = document.getElementById('voterTableBody');
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:40px; color:#6c757d;"><div style="display:inline-block; width:20px; height:20px; border:3px solid #f3f3f3; border-top:3px solid #667eea; border-radius:50%; animation:spin 1s linear infinite;"></div> Loading...</td></tr>';
+                
+                // Add spin animation
+                if (!document.getElementById('spinner-style')) {
+                    const style = document.createElement('style');
+                    style.id = 'spinner-style';
+                    style.textContent = '@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
+                    document.head.appendChild(style);
+                }
+                
+                // Fetch sorted data
+                const separator = dataUrl.includes('?') ? '&' : '?';
+                fetch(fullUrl + separator + 'ajax=1')
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        // Update table headers
+                        document.querySelectorAll('th').forEach((th, index) => {
+                            th.className = data.headers[index].class;
+                            th.setAttribute('data-url', data.headers[index].url);
+                        });
+                        
+                        // Update table body
+                        tbody.innerHTML = data.html;
+                        
+                        // Update stats
+                        document.querySelector('.stats').innerHTML = data.stats;
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:40px; color:#dc3545;">Error loading data. Please refresh the page.</td></tr>';
+                    });
+            });
         });
     </script>
 </body>
