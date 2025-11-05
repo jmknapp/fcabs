@@ -8,6 +8,13 @@ SOURCE_DIR="/home/jmknapp/indivisible"
 DEPLOY_DIR="/var/www/html/ionic/fcabs"
 APP_FILE="voter_viewer.php"
 
+# Load environment variables from .env file
+if [ -f "$SOURCE_DIR/.env" ]; then
+    export $(grep -v '^#' "$SOURCE_DIR/.env" | xargs)
+else
+    echo "Warning: .env file not found, database connectivity check will be skipped"
+fi
+
 echo "================================================"
 echo "Franklin County Voter Viewer - Deployment"
 echo "================================================"
@@ -47,6 +54,16 @@ if [ -f "$SOURCE_DIR/fearsomefrog.png" ]; then
     echo "   Logo file copied"
 else
     echo "   ⚠️  Warning: fearsomefrog.png not found"
+fi
+
+# Copy .env file
+echo "🔑 Copying environment configuration..."
+if [ -f "$SOURCE_DIR/.env" ]; then
+    sudo cp "$SOURCE_DIR/.env" "$DEPLOY_DIR/"
+    echo "   .env file copied"
+else
+    echo "   ⚠️  .env file not found"
+    echo "   Create one from .env.example with your database credentials"
 fi
 
 # Create .htaccess for Apache configuration
@@ -182,6 +199,7 @@ fi
 echo ""
 echo "Files deployed:"
 echo "  • index.php (main application)"
+echo "  • .env (database credentials)"
 echo "  • .htaccess (Apache configuration)"
 echo "  • README.txt (deployment info)"
 echo "  • favicon.ico, favicon-*.png (site icons)"
@@ -200,11 +218,15 @@ else
 fi
 
 # Check database connectivity
-if mysql -u root -pR_250108_z -e "USE ohsosvoterfiles; SELECT COUNT(*) FROM fcabs2025;" &>/dev/null; then
-    echo "  ✅ Database connection successful"
+if [ -n "$DB_USER" ] && [ -n "$DB_PASS" ] && [ -n "$DB_NAME" ] && [ -n "$TABLE_NAME" ]; then
+    if mysql -u "$DB_USER" -p"$DB_PASS" -e "USE $DB_NAME; SELECT COUNT(*) FROM $TABLE_NAME;" &>/dev/null; then
+        echo "  ✅ Database connection successful"
+    else
+        echo "  ⚠️  Warning: Could not connect to database"
+        echo "     Check MySQL credentials and table name in voter_viewer.php"
+    fi
 else
-    echo "  ⚠️  Warning: Could not connect to database"
-    echo "     Check MySQL credentials and table name in index.php"
+    echo "  ⚠️  Database credentials not loaded, skipping connectivity check"
 fi
 
 # Check directory permissions

@@ -7,15 +7,46 @@ from flask import Flask, render_template_string, request, jsonify
 import mysql.connector
 from datetime import datetime
 from urllib.parse import urlencode
+import os
+from pathlib import Path
 
 app = Flask(__name__)
 
-# Database configuration
+# Load environment variables from .env file
+def load_env(env_path):
+    """Load environment variables from .env file"""
+    if not env_path.exists():
+        raise FileNotFoundError(
+            f"Error: .env file not found at {env_path}. "
+            "Please copy .env.example to .env and configure your database credentials."
+        )
+    
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            # Skip comments and empty lines
+            if not line or line.startswith('#'):
+                continue
+            
+            # Parse KEY=VALUE
+            if '=' in line:
+                key, value = line.split('=', 1)
+                key = key.strip()
+                value = value.strip()
+                # Only set if not already in environment
+                if key not in os.environ:
+                    os.environ[key] = value
+
+# Load .env file from script directory
+env_file = Path(__file__).parent / '.env'
+load_env(env_file)
+
+# Database configuration from environment variables
 DB_CONFIG = {
-    'host': 'localhost',
-    'user': 'root',
-    'password': 'R_250108_z',
-    'database': 'ohsosvoterfiles'
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'user': os.getenv('DB_USER'),
+    'password': os.getenv('DB_PASS'),
+    'database': os.getenv('DB_NAME')
 }
 
 HTML_TEMPLATE = '''

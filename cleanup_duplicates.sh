@@ -2,10 +2,19 @@
 # One-time cleanup script to remove duplicate local_id records
 # Keeps the most recent record (by date_requested) for each voter
 
-DB_USER="root"
-DB_PASS="R_250108_z"
-DB_NAME="ohsosvoterfiles"
-TABLE_NAME="fcabs2025"
+# Load environment variables from .env file
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+else
+    echo "Error: .env file not found"
+    echo "Please copy .env.example to .env and configure your database credentials."
+    exit 1
+fi
+
+DB_USER="${DB_USER}"
+DB_PASS="${DB_PASS}"
+DB_NAME="${DB_NAME}"
+TABLE_NAME="${TABLE_NAME}"
 
 echo "Cleaning up duplicate records..."
 echo "This will keep only the most recent ballot request per voter"

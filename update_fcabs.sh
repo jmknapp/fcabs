@@ -2,11 +2,20 @@
 # Daily update script for Franklin County absentee ballot data
 # Usage: ./update_fcabs.sh <new_csv_file>
 
+# Load environment variables from .env file
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+else
+    echo "Error: .env file not found"
+    echo "Please copy .env.example to .env and configure your database credentials."
+    exit 1
+fi
+
 CSV_FILE="$1"
-DB_USER="root"
-DB_PASS="R_250108_z"
-DB_NAME="ohsosvoterfiles"
-TABLE_NAME="fcabs2025"
+DB_USER="${DB_USER}"
+DB_PASS="${DB_PASS}"
+DB_NAME="${DB_NAME}"
+TABLE_NAME="${TABLE_NAME}"
 TEMP_TABLE="${TABLE_NAME}_temp"
 
 if [ -z "$CSV_FILE" ]; then

@@ -1,10 +1,39 @@
 <?php
 // Franklin County Absentee Ballot Voter Viewer
-// Database connection settings
-$db_host = 'localhost';
-$db_user = 'root';
-$db_pass = 'R_250108_z';
-$db_name = 'ohsosvoterfiles';
+
+// Load environment variables from .env file
+function loadEnv($path) {
+    if (!file_exists($path)) {
+        die("Error: .env file not found. Please copy .env.example to .env and configure your database credentials.");
+    }
+    
+    $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        // Skip comments and empty lines
+        if (strpos(trim($line), '#') === 0 || trim($line) === '') {
+            continue;
+        }
+        
+        // Parse KEY=VALUE
+        list($name, $value) = explode('=', $line, 2);
+        $name = trim($name);
+        $value = trim($value);
+        
+        // Set as environment variable if not already set
+        if (!getenv($name)) {
+            putenv("$name=$value");
+        }
+    }
+}
+
+// Load .env file
+loadEnv(__DIR__ . '/.env');
+
+// Database connection settings from environment variables
+$db_host = getenv('DB_HOST') ?: 'localhost';
+$db_user = getenv('DB_USER');
+$db_pass = getenv('DB_PASS');
+$db_name = getenv('DB_NAME');
 
 // Get selected filters from dropdown
 $selected_status = isset($_GET['status']) ? $_GET['status'] : 'ALL';

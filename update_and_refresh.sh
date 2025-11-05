@@ -11,11 +11,20 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Database configuration
-DB_USER="root"
-DB_PASS="R_250108_z"
-DB_NAME="ohsosvoterfiles"
-TABLE_NAME="fcabs2025"
+# Load environment variables from .env file
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+else
+    echo -e "${RED}Error: .env file not found${NC}"
+    echo "Please copy .env.example to .env and configure your database credentials."
+    exit 1
+fi
+
+# Database configuration from environment variables
+DB_USER="${DB_USER}"
+DB_PASS="${DB_PASS}"
+DB_NAME="${DB_NAME}"
+TABLE_NAME="${TABLE_NAME}"
 
 # Check if CSV file argument provided
 if [ -z "$1" ]; then
