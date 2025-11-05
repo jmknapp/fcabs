@@ -1,0 +1,38 @@
+# Voter Data Files (CSV and TXT)
+*.csv
+VOTERFILE_*.TXT
+*Voter List*.txt
+
+# Database dumps
+*.sql
+
+# Logs
+*.log
+update.log
+
+# Temporary files
+*_temp
+*.tmp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+*.egg-info/
+
+# Backup files
+*.bak
+*.backup
+
