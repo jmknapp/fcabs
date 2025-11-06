@@ -39,3 +39,5 @@ venv/
 # Environment variables (contains sensitive credentials)
 .env
 
+cookies.txt
+page.html

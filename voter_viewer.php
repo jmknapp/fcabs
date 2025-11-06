@@ -536,7 +536,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
                 <h1>🗳️ Franklin County Absentee Voters</h1>
                 <p>Mail-in ballot tracking and status viewer</p>
                 <p style="margin-top: 10px; font-size: 13px; opacity: 0.85;">
-                    📅 Data as of: <strong>November 5, 2025</strong>
+                    📅 Data as of: <strong>November 6, 2025</strong>
                 </p>
             </div>
         </div>

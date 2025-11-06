@@ -42,38 +42,8 @@ if [ ! -f "$CSV_FILE" ]; then
     exit 1
 fi
 
-# Extract date from filename (e.g., fcabs1105.csv -> 11/05)
-FILENAME=$(basename "$CSV_FILE")
-if [[ $FILENAME =~ fcabs([0-9]{2})([0-9]{2})\.csv ]]; then
-    MONTH="${BASH_REMATCH[1]}"
-    DAY="${BASH_REMATCH[2]}"
-    
-    # Convert month number to name
-    case $MONTH in
-        01) MONTH_NAME="January" ;;
-        02) MONTH_NAME="February" ;;
-        03) MONTH_NAME="March" ;;
-        04) MONTH_NAME="April" ;;
-        05) MONTH_NAME="May" ;;
-        06) MONTH_NAME="June" ;;
-        07) MONTH_NAME="July" ;;
-        08) MONTH_NAME="August" ;;
-        09) MONTH_NAME="September" ;;
-        10) MONTH_NAME="October" ;;
-        11) MONTH_NAME="November" ;;
-        12) MONTH_NAME="December" ;;
-        *) MONTH_NAME="" ;;
-    esac
-    
-    # Remove leading zero from day
-    DAY=$((10#$DAY))
-    
-    NEW_DATE="${MONTH_NAME} ${DAY}, 2025"
-else
-    echo -e "${YELLOW}Warning: Could not extract date from filename${NC}"
-    echo -n "Enter the data date (e.g., November 5, 2025): "
-    read NEW_DATE
-fi
+# Use current date
+NEW_DATE=$(date "+%B %-d, %Y")
 
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Franklin County Voter Data Update${NC}"
@@ -93,197 +63,92 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 0
 fi
 
-# Step 1: Load data into temporary table
+# Step 1: Get record count before clearing
 echo ""
-echo -e "${GREEN}Step 1: Loading CSV data into temporary table...${NC}"
+echo -e "${GREEN}Step 1: Checking current data...${NC}"
+
+MAIN_COUNT_BEFORE=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SELECT COUNT(*) FROM $TABLE_NAME;")
+echo "Records in table (before): $MAIN_COUNT_BEFORE"
+
+# Step 2: Clear the table
+echo ""
+echo -e "${GREEN}Step 2: Clearing existing data...${NC}"
 
 mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" << EOF
--- Drop temporary table if exists
-DROP TABLE IF EXISTS fcabs_temp;
+TRUNCATE TABLE $TABLE_NAME;
+EOF
 
--- Create temporary table with same structure
-CREATE TABLE fcabs_temp LIKE $TABLE_NAME;
+echo -e "${GREEN}✓ Table cleared${NC}"
 
+# Step 3: Load new data
+echo ""
+echo -e "${GREEN}Step 3: Loading new data from CSV...${NC}"
+
+mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" << EOF
 -- Disable keys for faster loading
-ALTER TABLE fcabs_temp DISABLE KEYS;
+ALTER TABLE $TABLE_NAME DISABLE KEYS;
 
--- Load data from CSV
+-- Load data from CSV (preprocessed with underscores and status field)
+-- First specify CSV column order, then map to table columns
 LOAD DATA LOCAL INFILE '$CSV_FILE'
-INTO TABLE fcabs_temp
+INTO TABLE $TABLE_NAME
 FIELDS TERMINATED BY '\t'
 LINES TERMINATED BY '\n'
 IGNORE 1 LINES
-(@local_id, @voter_status, @county_number, @county_id, @last_name, @first_name,
- @middle_name, @suffix, @date_of_birth, @registration_date, @voter_status2,
- @party_affiliation, @residential_address1, @residential_address2,
- @residential_city, @residential_state, @residential_zip, @residential_zip_plus4,
- @residential_country, @residential_postalcode, @mailing_address1, @mailing_address2,
- @mailing_address3, @mailing_city, @mailing_state, @mailing_zip, @mailing_zip_plus4,
- @mailing_country, @mailing_postal_code, @career_center, @city, @city_school_district,
- @county_court_district, @congressional_district, @court_of_appeals, @edu_service_center_district,
- @exempted_vill_school_district, @library, @local_school_district, @municipal_court_district,
- @precinct_name, @precinct_code, @state_board_of_education, @state_representative_district,
- @state_senate_district, @township, @village, @ward, @primary_date, @primary_party,
- @absentee_type, @date_application_received, @application_type, @ballot_mailed_date,
- @ballot_returned_date, @ballot_status, @ballot_spoiled_reason)
+(@PRECINCT_NAME, @PRECINCT_CODE, @PRECINCT_CODE_WITH_SPLIT, @CITY_OR_VILLAGE,
+ @SCHOOL_DISTRICT, @TOWNSHIP, @HOUSE_DISTRICT, @SENATE_DISTRICT, @CONGRESS_DISTRICT,
+ @POLICE_DISTRICT, @ROAD_DISTRICT, @FIRE_DISTRICT, @PARK_DISTRICT, @COURT_APPEALS_NAME,
+ @BOARD_OF_ED_NAME, @PARTY, @DATE_MAILED, @DATE_REGISTERED, @LOCAL_ID, @YEAR_OF_BIRTH,
+ @FIRST_NAME, @MIDDLE_NAME, @LAST_NAME, @SUFFIX_NAME, @ADDRESS_LINE_1, @ADDRESS_LINE_2,
+ @ADDRESS_LINE_3, @ADDRESS_LINE_4, @CITY, @STATE, @ZIP, @ZIP_PLUS_4, @MAILED,
+ @DATE_REQUESTED, @DATE_RETURNED, @BALLOT_STYLE, @status)
 SET
-    local_id = NULLIF(@local_id, ''),
-    voter_status = NULLIF(@voter_status, ''),
-    county_number = NULLIF(@county_number, ''),
-    county_id = NULLIF(@county_id, ''),
-    last_name = NULLIF(@last_name, ''),
-    first_name = NULLIF(@first_name, ''),
-    middle_name = NULLIF(@middle_name, ''),
-    suffix = NULLIF(@suffix, ''),
-    date_of_birth = STR_TO_DATE(NULLIF(@date_of_birth, ''), '%m/%d/%Y'),
-    registration_date = STR_TO_DATE(NULLIF(@registration_date, ''), '%m/%d/%Y %H:%i'),
-    voter_status2 = NULLIF(@voter_status2, ''),
-    party_affiliation = NULLIF(@party_affiliation, ''),
-    residential_address1 = NULLIF(@residential_address1, ''),
-    residential_address2 = NULLIF(@residential_address2, ''),
-    residential_city = NULLIF(@residential_city, ''),
-    residential_state = NULLIF(@residential_state, ''),
-    residential_zip = NULLIF(@residential_zip, ''),
-    residential_zip_plus4 = NULLIF(@residential_zip_plus4, ''),
-    residential_country = NULLIF(@residential_country, ''),
-    residential_postalcode = NULLIF(@residential_postalcode, ''),
-    mailing_address1 = NULLIF(@mailing_address1, ''),
-    mailing_address2 = NULLIF(@mailing_address2, ''),
-    mailing_address3 = NULLIF(@mailing_address3, ''),
-    mailing_city = NULLIF(@mailing_city, ''),
-    mailing_state = NULLIF(@mailing_state, ''),
-    mailing_zip = NULLIF(@mailing_zip, ''),
-    mailing_zip_plus4 = NULLIF(@mailing_zip_plus4, ''),
-    mailing_country = NULLIF(@mailing_country, ''),
-    mailing_postal_code = NULLIF(@mailing_postal_code, ''),
-    career_center = NULLIF(@career_center, ''),
-    city = NULLIF(@city, ''),
-    city_school_district = NULLIF(@city_school_district, ''),
-    county_court_district = NULLIF(@county_court_district, ''),
-    congressional_district = NULLIF(@congressional_district, ''),
-    court_of_appeals = NULLIF(@court_of_appeals, ''),
-    edu_service_center_district = NULLIF(@edu_service_center_district, ''),
-    exempted_vill_school_district = NULLIF(@exempted_vill_school_district, ''),
-    library = NULLIF(@library, ''),
-    local_school_district = NULLIF(@local_school_district, ''),
-    municipal_court_district = NULLIF(@municipal_court_district, ''),
-    precinct_name = NULLIF(@precinct_name, ''),
-    precinct_code = NULLIF(@precinct_code, ''),
-    state_board_of_education = NULLIF(@state_board_of_education, ''),
-    state_representative_district = NULLIF(@state_representative_district, ''),
-    state_senate_district = NULLIF(@state_senate_district, ''),
-    township = NULLIF(@township, ''),
-    village = NULLIF(@village, ''),
-    ward = NULLIF(@ward, ''),
-    primary_date = STR_TO_DATE(NULLIF(@primary_date, ''), '%m/%d/%Y'),
-    primary_party = NULLIF(@primary_party, ''),
-    absentee_type = NULLIF(@absentee_type, ''),
-    date_application_received = STR_TO_DATE(NULLIF(@date_application_received, ''), '%m/%d/%Y %H:%i'),
-    application_type = NULLIF(@application_type, ''),
-    ballot_mailed_date = STR_TO_DATE(NULLIF(@ballot_mailed_date, ''), '%m/%d/%Y %H:%i'),
-    ballot_returned_date = STR_TO_DATE(NULLIF(@ballot_returned_date, ''), '%m/%d/%Y %H:%i'),
-    ballot_status = NULLIF(@ballot_status, ''),
-    ballot_spoiled_reason = NULLIF(@ballot_spoiled_reason, '');
+    precinct_name = NULLIF(@PRECINCT_NAME, ''),
+    precinct_code = NULLIF(@PRECINCT_CODE, ''),
+    precinct_code_with_split = NULLIF(@PRECINCT_CODE_WITH_SPLIT, ''),
+    city_or_village = NULLIF(@CITY_OR_VILLAGE, ''),
+    school_district = NULLIF(@SCHOOL_DISTRICT, ''),
+    township = NULLIF(@TOWNSHIP, ''),
+    house_district = NULLIF(@HOUSE_DISTRICT, ''),
+    senate_district = NULLIF(@SENATE_DISTRICT, ''),
+    congress_district = NULLIF(@CONGRESS_DISTRICT, ''),
+    police_district = NULLIF(@POLICE_DISTRICT, ''),
+    road_district = NULLIF(@ROAD_DISTRICT, ''),
+    fire_district = NULLIF(@FIRE_DISTRICT, ''),
+    park_district = NULLIF(@PARK_DISTRICT, ''),
+    court_appeals_name = NULLIF(@COURT_APPEALS_NAME, ''),
+    board_of_ed_name = NULLIF(@BOARD_OF_ED_NAME, ''),
+    party = NULLIF(@PARTY, ''),
+    date_mailed = STR_TO_DATE(NULLIF(@DATE_MAILED, ''), '%m/%d/%Y'),
+    date_registered = STR_TO_DATE(NULLIF(@DATE_REGISTERED, ''), '%m/%d/%Y'),
+    local_id = NULLIF(@LOCAL_ID, ''),
+    year_of_birth = NULLIF(@YEAR_OF_BIRTH, ''),
+    first_name = NULLIF(@FIRST_NAME, ''),
+    middle_name = NULLIF(@MIDDLE_NAME, ''),
+    last_name = NULLIF(@LAST_NAME, ''),
+    suffix_name = NULLIF(@SUFFIX_NAME, ''),
+    address_line_1 = NULLIF(@ADDRESS_LINE_1, ''),
+    address_line_2 = NULLIF(@ADDRESS_LINE_2, ''),
+    address_line_3 = NULLIF(@ADDRESS_LINE_3, ''),
+    address_line_4 = NULLIF(@ADDRESS_LINE_4, ''),
+    city = NULLIF(@CITY, ''),
+    state = NULLIF(@STATE, ''),
+    zip = NULLIF(@ZIP, ''),
+    zip_plus_4 = NULLIF(@ZIP_PLUS_4, ''),
+    mailed = NULLIF(@MAILED, ''),
+    date_requested = STR_TO_DATE(NULLIF(@DATE_REQUESTED, ''), '%m/%d/%Y'),
+    date_returned = STR_TO_DATE(NULLIF(@DATE_RETURNED, ''), '%m/%d/%Y'),
+    ballot_style = NULLIF(@BALLOT_STYLE, ''),
+    status = NULLIF(@status, '');
 
 -- Re-enable keys
-ALTER TABLE fcabs_temp ENABLE KEYS;
-EOF
-
-echo -e "${GREEN}✓ Data loaded into temporary table${NC}"
-
-# Step 2: Get row counts
-echo ""
-echo -e "${GREEN}Step 2: Analyzing data...${NC}"
-
-TEMP_COUNT=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SELECT COUNT(*) FROM fcabs_temp;")
-MAIN_COUNT_BEFORE=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SELECT COUNT(*) FROM $TABLE_NAME;")
-
-echo "Records in CSV file: $TEMP_COUNT"
-echo "Records in main table (before): $MAIN_COUNT_BEFORE"
-
-# Step 3: Update existing records and insert new ones
-echo ""
-echo -e "${GREEN}Step 3: Updating main table...${NC}"
-
-mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" << EOF
--- Update existing records
-UPDATE $TABLE_NAME main
-INNER JOIN fcabs_temp temp ON main.local_id = temp.local_id
-SET
-    main.voter_status = temp.voter_status,
-    main.county_number = temp.county_number,
-    main.county_id = temp.county_id,
-    main.last_name = temp.last_name,
-    main.first_name = temp.first_name,
-    main.middle_name = temp.middle_name,
-    main.suffix = temp.suffix,
-    main.date_of_birth = temp.date_of_birth,
-    main.registration_date = temp.registration_date,
-    main.voter_status2 = temp.voter_status2,
-    main.party_affiliation = temp.party_affiliation,
-    main.residential_address1 = temp.residential_address1,
-    main.residential_address2 = temp.residential_address2,
-    main.residential_city = temp.residential_city,
-    main.residential_state = temp.residential_state,
-    main.residential_zip = temp.residential_zip,
-    main.residential_zip_plus4 = temp.residential_zip_plus4,
-    main.residential_country = temp.residential_country,
-    main.residential_postalcode = temp.residential_postalcode,
-    main.mailing_address1 = temp.mailing_address1,
-    main.mailing_address2 = temp.mailing_address2,
-    main.mailing_address3 = temp.mailing_address3,
-    main.mailing_city = temp.mailing_city,
-    main.mailing_state = temp.mailing_state,
-    main.mailing_zip = temp.mailing_zip,
-    main.mailing_zip_plus4 = temp.mailing_zip_plus4,
-    main.mailing_country = temp.mailing_country,
-    main.mailing_postal_code = temp.mailing_postal_code,
-    main.career_center = temp.career_center,
-    main.city = temp.city,
-    main.city_school_district = temp.city_school_district,
-    main.county_court_district = temp.county_court_district,
-    main.congressional_district = temp.congressional_district,
-    main.court_of_appeals = temp.court_of_appeals,
-    main.edu_service_center_district = temp.edu_service_center_district,
-    main.exempted_vill_school_district = temp.exempted_vill_school_district,
-    main.library = temp.library,
-    main.local_school_district = temp.local_school_district,
-    main.municipal_court_district = temp.municipal_court_district,
-    main.precinct_name = temp.precinct_name,
-    main.precinct_code = temp.precinct_code,
-    main.state_board_of_education = temp.state_board_of_education,
-    main.state_representative_district = temp.state_representative_district,
-    main.state_senate_district = temp.state_senate_district,
-    main.township = temp.township,
-    main.village = temp.village,
-    main.ward = temp.ward,
-    main.primary_date = temp.primary_date,
-    main.primary_party = temp.primary_party,
-    main.absentee_type = temp.absentee_type,
-    main.date_application_received = temp.date_application_received,
-    main.application_type = temp.application_type,
-    main.ballot_mailed_date = temp.ballot_mailed_date,
-    main.ballot_returned_date = temp.ballot_returned_date,
-    main.ballot_status = temp.ballot_status,
-    main.ballot_spoiled_reason = temp.ballot_spoiled_reason;
-
--- Insert new records
-INSERT INTO $TABLE_NAME
-SELECT temp.*
-FROM fcabs_temp temp
-LEFT JOIN $TABLE_NAME main ON temp.local_id = main.local_id
-WHERE main.local_id IS NULL;
-
--- Clean up temporary table
-DROP TABLE fcabs_temp;
+ALTER TABLE $TABLE_NAME ENABLE KEYS;
 EOF
 
 MAIN_COUNT_AFTER=$(mysql -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -sN -e "SELECT COUNT(*) FROM $TABLE_NAME;")
-NEW_RECORDS=$((MAIN_COUNT_AFTER - MAIN_COUNT_BEFORE))
 
-echo -e "${GREEN}✓ Main table updated${NC}"
-echo "Records in main table (after): $MAIN_COUNT_AFTER"
-echo "New records added: $NEW_RECORDS"
+echo -e "${GREEN}✓ Data loaded successfully${NC}"
+echo "Records loaded: $MAIN_COUNT_AFTER"
 
 # Step 4: Update dates in viewer files
 echo ""
@@ -291,7 +156,7 @@ echo -e "${GREEN}Step 4: Updating 'Data as of' date in viewer files...${NC}"
 
 # Update PHP file
 if [ -f "voter_viewer.php" ]; then
-    sed -i "s/Data as of: [^<]*/Data as of: $NEW_DATE/" voter_viewer.php
+    sed -i "s|Data as of: .*</strong>|Data as of: <strong>$NEW_DATE</strong>|" voter_viewer.php
     echo -e "${GREEN}✓ Updated voter_viewer.php${NC}"
 else
     echo -e "${YELLOW}⚠ voter_viewer.php not found${NC}"
@@ -299,7 +164,7 @@ fi
 
 # Update Python file
 if [ -f "voter_viewer.py" ]; then
-    sed -i "s/Data as of: [^<]*/Data as of: $NEW_DATE/" voter_viewer.py
+    sed -i "s|Data as of: .*</strong>|Data as of: <strong>$NEW_DATE</strong>|" voter_viewer.py
     echo -e "${GREEN}✓ Updated voter_viewer.py${NC}"
 else
     echo -e "${YELLOW}⚠ voter_viewer.py not found${NC}"
@@ -335,9 +200,8 @@ echo ""
 echo "Summary:"
 echo "  • CSV file: $CSV_FILE"
 echo "  • Data date: $NEW_DATE"
-echo "  • Records processed: $TEMP_COUNT"
-echo "  • Records in database: $MAIN_COUNT_AFTER"
-echo "  • New records added: $NEW_RECORDS"
+echo "  • Records before: $MAIN_COUNT_BEFORE"
+echo "  • Records after: $MAIN_COUNT_AFTER"
 if [ "$DEPLOYED" = true ]; then
     echo "  • Deployed: Yes"
 else
